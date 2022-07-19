@@ -3,7 +3,7 @@
 import streamlit as st
 from streamlit_option_menu import option_menu
 import config
-# import sched_helpers
+from schedutils import schedutils as sc
 import sched
 # import feedback
 # import about
@@ -19,7 +19,7 @@ st.set_page_config(
     }
 )
 # Display the header
-raccoon_string = sched.image_data_str('assets/raccoon.png')
+raccoon_string = sc.image_data_str('assets/raccoon.png')
 html = f'''
 <hr style='margin: 0.25em'/>
 <h1 style='text-align: center'>
@@ -38,7 +38,7 @@ nav_bar_selected = option_menu(None, config.APP_PAGES,
 
 # Display the selected page
 if nav_bar_selected == "Home":
-    pass # sched.display()
+    sched.display()
 elif nav_bar_selected == "About":
     pass # about.display()
 elif nav_bar_selected == 'Feedback':
