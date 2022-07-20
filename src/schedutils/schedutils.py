@@ -103,6 +103,69 @@ def ical_to_df(ical_str : str, start : datetime.date = None, end : datetime.date
 
     return df
 
+def find_off_service(sched : pd.DataFrame, blocks: pd.DataFrame, res: pd.DataFrame,
+    threshold: int = 1):
+    '''Returns a DataFrame where each row is a `resident` who is off-service
+    between `start_date` and `end_date`'''
+
+    sched_by_block = [sched.loc[b['start_date']:b['end_date'], :] for _, b in blocks.iterrows()]
+
+    def _get_zero_shift_counts_for_block(df: pd.DataFrame, block_id: int):
+        scbb = df.groupby('resident')['shift'].count()
+        scbb = pd.DataFrame(scbb)
+        scbb = scbb.join(res.set_index('resident'), how='right')
+        scbb.fillna(0, inplace=True)
+        scbb['block_id'] = block_id
+        scbb = scbb[scbb['shift'] <= threshold]
+        scbb = scbb.rename({'shift': 'shift_count'}).drop('year', axis=1)
+        scbb = scbb.reset_index(drop=False)
+        return scbb
+
+    zero_shift_counts_by_block = [_get_zero_shift_counts_for_block(df, block_idx) 
+                                  for block_idx, df in enumerate(sched_by_block)
+                                  if len(df) > 0]
+    zero_shift_counts_by_block = pd.concat(zero_shift_counts_by_block, axis=0).reset_index(drop=True)
+    print(zero_shift_counts_by_block)
+    zero_shift_counts_by_block = pd.merge(zero_shift_counts_by_block, blocks, on='block_id') # TODO
+    return zero_shift_counts_by_block
+
+def make_offservice_entries(off_service_residents_by_block: pd.DataFrame,
+    off_service_start_time: pd.Timedelta = pd.Timedelta(0, 'h'),
+    off_service_end_time: pd.Timedelta = pd.Timedelta(86399, 's'),
+    off_service_shift_code: str = "OS",
+    off_service_shift_name: str = 'Off Service',
+    tz = pytz.timezone('America/Detroit')):
+
+    sched_entries = []
+    for _, off_service_res in off_service_residents_by_block.iterrows():
+        for ts in pd.date_range(off_service_res['start_date'], off_service_res['end_date'], freq='1D', inclusive='left'):
+            os_start_datetime = (ts + off_service_start_time).tz_localize(tz)
+            os_end_datetime = (ts + off_service_end_time).tz_localize(tz)
+            off_service_dummy_row = {
+                'summary': f'{off_service_shift_code} {off_service_shift_code} {off_service_res["resident"]}',
+                'resident': off_service_res['resident'],
+                'shift': off_service_shift_code,
+                'start': os_start_datetime,
+                'end': os_end_datetime,
+                'type': off_service_shift_name,
+                'facility': off_service_shift_name 
+            }
+            sched_entries.append(off_service_dummy_row)
+    sched_entries = pd.DataFrame(sched_entries)
+    return sched_entries.set_index('start', drop=False)
+
+
+def get_final_sched(sched: pd.DataFrame, blocks: pd.DataFrame, res: pd.DataFrame):
+    '''Makes modifications to the vanilla iCal schedule to include things like 
+    off service rotations, vacations (not implemented)'''
+
+    off_service_residents_by_block = find_off_service(sched, blocks, res)
+    off_service_sched_entries = make_offservice_entries(off_service_residents_by_block)
+
+    sched_final = pd.concat([sched, off_service_sched_entries], axis=0).sort_index()
+    return sched_final
+
+
 def resident_list(sched_df : pd.DataFrame):
     return list(sched_df['resident'].unique())
 
