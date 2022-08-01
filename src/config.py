@@ -15,5 +15,6 @@ CALENDAR_URL = 'http://www.shiftadmin.com/schedule_ical_group.php?cd=UIwfTiYhARs
 SCHED_ICAL_START_DATE = TZ.localize(datetime.datetime(2022, 7, 1, 6, 0, 0)).astimezone(pytz.utc)
 SCHED_ICAL_END_DATE = TZ.localize(datetime.datetime(2023, 6, 30, 23, 59, 59)).astimezone(pytz.utc)
 RESIDENTS_CSV = 'data/residents.csv'
+BLOCKS_CSV = 'data/blocks.csv'
 MASTER_BLOCK_SCHEDULE_CSV = 'data/master_block_schedule.csv'
 OFF_SERVICE_HOURS_CSV = 'data/off_service_hours.csv'

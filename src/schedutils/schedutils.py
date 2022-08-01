@@ -4,15 +4,23 @@ from icalevents.icalevents import events
 import datetime
 from dateutil.parser import parse
 import pandas as pd
+import numpy as np
 import pytz
 import urllib
 import base64
+from typing import Collection
 
 def resident_df(resident_csv : str) -> pd.DataFrame:
     '''Load and preprocess resident list dataframe'''
     # Read in resident list
     resdf = pd.read_csv(resident_csv)
     return resdf
+
+def blocks_df(blocks_csv : str) -> pd.DataFrame:
+    '''Load and preprocess the blocks dataframe'''
+    blocks = pd.read_csv('data/blocks.csv', parse_dates=[1,3])
+    blocks.index.name = 'block_id'
+    return blocks
 
 def off_service_hours_df(osh_csv : str) -> pd.DataFrame:
     '''Load and precprocess off-service rotation hours listing'''
@@ -125,7 +133,6 @@ def find_off_service(sched : pd.DataFrame, blocks: pd.DataFrame, res: pd.DataFra
                                   for block_idx, df in enumerate(sched_by_block)
                                   if len(df) > 0]
     zero_shift_counts_by_block = pd.concat(zero_shift_counts_by_block, axis=0).reset_index(drop=True)
-    print(zero_shift_counts_by_block)
     zero_shift_counts_by_block = pd.merge(zero_shift_counts_by_block, blocks, on='block_id') # TODO
     return zero_shift_counts_by_block
 
@@ -159,12 +166,95 @@ def get_final_sched(sched: pd.DataFrame, blocks: pd.DataFrame, res: pd.DataFrame
     '''Makes modifications to the vanilla iCal schedule to include things like 
     off service rotations, vacations (not implemented)'''
 
+    # filter schedule to only UM residents
+    sched = sched.loc[np.isin(sched['resident'], res['resident']), :]
+
     off_service_residents_by_block = find_off_service(sched, blocks, res)
     off_service_sched_entries = make_offservice_entries(off_service_residents_by_block)
 
     sched_final = pd.concat([sched, off_service_sched_entries], axis=0).sort_index()
     return sched_final
 
+def hourly_shift_info(fs: pd.DataFrame):
+    sched = fs
+    hdf_min = sched['start'].min()
+    hdf_max = sched['end'].max()
+    hdf_idx = pd.date_range(hdf_min, hdf_max, freq='1H', inclusive='left')
+    hdf = pd.DataFrame({'shiftsInfo': [[] for _ in range(len(hdf_idx))]}, index=hdf_idx)
+                                                                                                                                                                                                                           
+    for _, shift in sched.iterrows():
+        shiftidx = pd.date_range(shift['start'], shift['end'], freq='1H', inclusive='left')
+        shiftInfo = {'resident': shift['resident'], 'shift': shift['shift'], 'summary': shift['summary']}
+        hdf.loc[shiftidx, 'shiftsInfo'] = hdf.loc[shiftidx, 'shiftsInfo'].apply(lambda x: x + [shiftInfo])
+    hdf['nUsersWorking'] = hdf['shiftsInfo'].apply(len)
+    hdf.index.name = 'time'
+
+    hdf['date'] = hdf.index.date
+    hdf['time'] = hdf.index.time
+
+    return hdf     
+
+def working_free_for_date_time(sched: pd.DataFrame, resident_choices: Collection[str], bd: datetime.date, st: datetime.time, et: datetime.time, tz):
+    '''For a given date, return a list of residents who are free, partially free, and working during given time interval'''
+
+    fs = filter_sched_residents(sched, resident_choices)
+    # select only the shifts that start on the bd day of interest
+    fs = fs.loc[bd:(pd.Timestamp(bd) + pd.Timedelta(1439, 'm')), :]
+
+    range_start = pd.Timestamp(datetime.datetime.combine(bd, st), tz=tz)
+    range_end = pd.Timestamp(datetime.datetime.combine(bd, et), tz=tz)
+    target_range = pd.date_range(range_start, range_end, freq='H').to_numpy()
+    working, partial, free = [],[],[]
+    fs_res_list = fs['resident'].drop_duplicates().to_list()
+    fully_offday_res = [(res, 'Off') for res in resident_choices if not (res in fs_res_list)]
+
+    for _, row in fs.iterrows():
+        hr_range = pd.date_range(row['start'], row['end'], freq='H').to_numpy()
+        hr_range_filt = hr_range[(hr_range >= range_start) & (hr_range <= range_end)]
+
+        if len(hr_range_filt) == len(target_range): # fully working
+            working.append((row['resident'], row['shift']))
+        elif len(hr_range_filt) == 0: # no overlap
+            free.append((row['resident'], row['shift']))
+        else: # partially working
+            partial.append((row['resident'], row['shift']))
+    
+    return working, partial, free, fully_offday_res
+
+
+
+def hourly_shifts_being_worked(shiftInfo: pd.DataFrame, st: datetime.time, et: datetime.time, sd: datetime.date, ed: datetime.date):
+    
+    n_users_working = shiftInfo.pivot(index='time', columns='date', values='nUsersWorking')
+    n_users_working.fillna(0, inplace=True)
+    n_users_working = n_users_working.loc[st:et, sd:ed]
+    return n_users_working
+
+def free_resident_hours(hsbw: pd.DataFrame, n_residents: int):
+    free_res_hrs = n_residents - hsbw
+    return free_res_hrs
+    
+def best_dates(free_res_hrs: pd.DataFrame, n_best_days=3):
+    avg_free_hours = free_res_hrs.mean(axis=0)
+    avg_free_hours = pd.DataFrame(avg_free_hours.sort_values(ascending=False)).reset_index()
+
+    max_days = n_best_days if n_best_days <= len(avg_free_hours) else len(avg_free_hours)
+    to_ret = [(avg_free_hours.iloc[i,0], avg_free_hours.iloc[i,1]) for i in range(max_days)]
+    return to_ret
+
+def filter_sched_dates(sched : pd.DataFrame, start_dt : pd.Timestamp, end_dt : pd.Timestamp):
+
+    # filter the schedule to the requested dates
+    fs = sched.copy()
+    fs = fs[start_dt:end_dt]
+    return fs
+
+def filter_sched_residents(sched : pd.DataFrame, resident_choices = Collection[str]):
+
+    fs = sched.copy()
+    # filter the schedule to the requested residents
+    fs = fs[fs['resident'].isin(resident_choices)]
+    return fs
 
 def resident_list(sched_df : pd.DataFrame):
     return list(sched_df['resident'].unique())
