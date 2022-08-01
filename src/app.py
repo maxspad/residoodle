@@ -5,6 +5,8 @@ from streamlit_option_menu import option_menu
 import config
 from schedutils import schedutils as sc
 import sched
+import about 
+import feedback
 # import feedback
 # import about
 
@@ -40,9 +42,9 @@ nav_bar_selected = option_menu(None, config.APP_PAGES,
 if nav_bar_selected == "Home":
     sched.display()
 elif nav_bar_selected == "About":
-    pass # about.display()
+    about.display()
 elif nav_bar_selected == 'Feedback':
-    pass # feedback.display()
+    feedback.display()
 
 
 
