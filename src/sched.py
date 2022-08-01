@@ -120,13 +120,13 @@ def display():
 
         date_cols = st.columns(2)
         st_date = date_cols[0].date_input('Search between', key='st_date', 
-            min_value=sched['start'].min(), max_value=sched['end'].max(),
+            min_value=sched['start'].min(), max_value=sched['start'].max(),
             value=datetime.date.today())
         en_date_min_value = st_date
         en_date_min_value = sched['end'].min()
         en_date = date_cols[1].date_input('and ', key='en_date',
-            min_value=st_date, max_value=sched['end'].max(),
-            value=sched['end'].max())
+            min_value=st_date, max_value=sched['start'].max(),
+            value=sched['start'].max())
 
         time_cols = st.columns(2)
         st_time = time_cols[0].time_input('for each day, show results only between the hours of', value=datetime.time(17,00))

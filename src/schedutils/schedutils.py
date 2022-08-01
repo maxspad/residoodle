@@ -236,7 +236,8 @@ def free_resident_hours(hsbw: pd.DataFrame, n_residents: int):
     
 def best_dates(free_res_hrs: pd.DataFrame, n_best_days=3):
     avg_free_hours = free_res_hrs.mean(axis=0)
-    avg_free_hours = pd.DataFrame(avg_free_hours.sort_values(ascending=False)).reset_index()
+    # sort by free hours then date so ties are broken by earliest first
+    avg_free_hours = pd.DataFrame(avg_free_hours).reset_index().sort_values([0, 'date'], ascending=[False, True])
 
     max_days = n_best_days if n_best_days <= len(avg_free_hours) else len(avg_free_hours)
     to_ret = [(avg_free_hours.iloc[i,0], avg_free_hours.iloc[i,1]) for i in range(max_days)]
