@@ -221,6 +221,19 @@ def working_free_for_date_time(sched: pd.DataFrame, resident_choices: Collection
     
     return working, partial, free, fully_offday_res
 
+def working_free_for_date_range(sched: pd.DataFrame, resident_choices: Collection[str], 
+                                st_date: datetime.date, en_date: datetime.date, 
+                                st_time: datetime.time, en_time: datetime.time, tz):
+    date_range = pd.date_range(st_date, en_date)
+    retdf = []
+    for d in date_range:
+        wpfo = working_free_for_date_time(sched, resident_choices, d, st_time, en_time, tz)
+        wpfo = [len(x) for x in wpfo]
+        working, partial, free, off = wpfo
+        retdf.append({'Working': working, 'Partially Free': partial, 
+            'Free': free, 'Off': off})
+    retdf = pd.DataFrame(retdf, index=date_range)
+    return retdf
 
 
 def hourly_shifts_being_worked(shiftInfo: pd.DataFrame, st: datetime.time, et: datetime.time, sd: datetime.date, ed: datetime.date):

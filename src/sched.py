@@ -27,7 +27,8 @@ def load_and_preprocess_data():
     return sched, res, blocks 
 
 def display_free_res_hrs(free_res_hrs: pd.DataFrame):
-    st.header('All Dates/Times')
+    st.header('All Dates + All Times')
+    # st.markdown('### All Dates *and* All Times')
     st.markdown('Each cell is the number of residents *not* working for the given hour and date.')
     free_mat_styled = free_res_hrs.copy()
 
@@ -92,8 +93,9 @@ def style_shift_mat(shift_mat : pd.DataFrame) -> pd.DataFrame:
 
 def display_shift_mat(shift_mat_styled : pd.DataFrame) -> None:
     # Output the df and some text describing it
-    shift_mat_df_text = '''### Resident Schedules
-This table shows the scheduled shifts/rotations for the residents selected above'''
+    
+    shift_mat_df_text = '''This table shows the scheduled shifts/rotations for the residents selected above'''
+    st.header('Resident Schedules')
     st.markdown(shift_mat_df_text)
     st.dataframe(shift_mat_styled)
 
@@ -160,6 +162,14 @@ def display():
 
     # display the best dates and who's off/on during them
     display_best_dates(best_dates, sched, resident_choices, st_time, en_time)
+    
+    # display all dates in a bar graph
+    working_free_counts = sc.working_free_for_date_range(sched, resident_choices, st_date, en_date, st_time, en_time, config.TZ)
+    working_free_counts.index = [d.strftime('%m/%d') for d in working_free_counts.index]
+    working_free_counts.drop('Working', axis=1, inplace=True)
+    st.header('All Dates')
+    st.markdown('For the time range selected above, each bar represents the number of residents who are off or at least partially free for each date. Higher bars are better days.')
+    st.bar_chart(working_free_counts)
 
     # display the free resident hours
     display_free_res_hrs(free_res_hrs)
