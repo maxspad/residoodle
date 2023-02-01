@@ -150,9 +150,18 @@ with cols[1]:
 plot_func = {'Time of Day': h.res_type_cat_plot,
              'Site': h.res_site_cat_plot,
              'Shift Area (UM Only)': h.res_shift_cat_plot}[sel_exp_type]
-# plot_func = h.res_type_cat_plot if sel_exp_type == 'Time of Day' else h.res_site_cat_plot
 
-# if sel_class == 'All':
 h.two_by_two_plot(plot_func, s, use_relative=use_rel_by_res)
-# else:
-    # st.plotly_chart(plot_func(s, sel_class, use_relative=use_rel))
+
+###############################################################################
+
+s = s.set_index('Start')
+st.dataframe(s)
+s['Block'] = ''
+for blk, r in bd.iterrows():
+    s.loc[(s.index >= r['Start Date']) & (s.index < (r['End Date'] + datetime.timedelta(days=1))), 'Block'] = blk
+
+
+blah = s.groupby(['Block','Type'])['Shift'].count().reset_index()
+plt = px.line(blah, x='Block', y='Shift', color='Type', markers=True)
+st.plotly_chart(plt)
