@@ -56,9 +56,10 @@ def load_sched_api(start_date : datetime.date, end_date : datetime.date,
 
     return df
 
-def add_res_to_sched(sched : pd.DataFrame, res : pd.DataFrame) -> pd.DataFrame:
-    return (sched.merge(res[['userID','pgy']], how='left', on='userID')
-                 .rename({'pgy' : 'PGY'}, axis=1))
+def load_df_json_file(fn : str) -> pd.DataFrame: 
+    with open(fn) as data_file:
+        data = json.load(data_file)
+    return _postproc_df(_json_to_df(data))
 
 def _postproc_df(df : pd.DataFrame) -> pd.DataFrame:
     df['Start'] = pd.to_datetime(df['shiftStart'])
@@ -99,24 +100,9 @@ def _json_to_df(data : dict) -> pd.DataFrame:
         raise ScheduleError('Shiftadmin API failure')
     return df
 
-def load_df_json_file(fn : str) -> pd.DataFrame: 
-    with open(fn) as data_file:
-        data = json.load(data_file)
-    return _postproc_df(_json_to_df(data))
-
-def full_df_to_rel(df : pd.DataFrame) -> t.Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
-    '''Converts a giant long DF into a set of separate tables'''
-    # Group
-    groups_df = df[['groupID','groupShortName']].drop_duplicates().set_index('groupID').sort_index()
-    # Users
-    users_df = df[['userID','employeeID','nPI','firstName','lastName']].drop_duplicates().set_index('userID').sort_index()
-    # Facilities
-    facs_df = df[['facilityID','facilityExtID','facilityAbbreviation']].drop_duplicates().set_index('facilityID').sort_index()
-    # Shifts
-    shifts_df = df[['shiftID','shiftShortName','facilityID','groupID']]
-    shifts_df = shifts_df.drop_duplicates().set_index('shiftShortName').sort_index()
-    
-    return groups_df, users_df, facs_df, shifts_df
+def add_res_to_sched(sched : pd.DataFrame, res : pd.DataFrame) -> pd.DataFrame:
+    return (sched.merge(res[['userID','pgy']], how='left', on='userID')
+                 .rename({'pgy' : 'PGY'}, axis=1))
 
 def load_block_dates(fn : str) -> pd.DataFrame:
     bd = pd.read_csv(fn, parse_dates=['Start Date', 'End Date', 'Mid-transition Start Date'])
@@ -127,9 +113,43 @@ def load_residents(fn : str) -> pd.DataFrame:
     res = pd.read_csv(fn).reset_index()
     return res
 
-if __name__ == '__main__':
-    start_date = datetime.date.today()
-    end_date = datetime.date.today() + datetime.timedelta(days=7)
-    # load_df_api(start_date, end_date)
+def add_bd_to_sched(s : pd.DataFrame, bd : pd.DataFrame):
+    s = s.copy()
+    bd = bd.copy()
+    bd.index = [i+1.0 for i in range(len(bd))]
+    mids = bd[['Mid-Block Transition Date']]
+    mids.index = [b+0.5 for b in bd.index]
+    mids['Start Date'] = mids['Mid-Block Transition Date']
+    bd = pd.concat([bd[['Start Date']], mids[['Start Date']]], axis=0).sort_index()
+    bd.index.name = 'Block'
 
-    # load_df_api(start_date, start_date)
+    s['Block'] = -1
+    for blk, r in bd.iloc[:-1, :].iterrows():
+        print(blk, blk + 0.5, r)
+        s.loc[(s.index >= r['Start Date']) & (s.index < bd.loc[blk+0.5, 'Start Date']), 'Block'] = blk
+
+    return s
+
+class ScheduleExplorer:
+
+    def __init__(self, block_dates_fn : str, res_fn : str,
+        exclude_nonem=True):
+
+        self._bd = load_block_dates(block_dates_fn)
+        self._res = load_residents(res_fn)
+        self._s = None
+        self._exclude_nonem = exclude_nonem
+
+    def load_sched(self, start_date : datetime.date, end_date : datetime.date):
+        self._s = load_sched_api(start_date, end_date)
+        self._s = add_res_to_sched(self._s, self._res)
+        if self._exclude_nonem:
+            self._s = self._s.dropna(subset=['PGY'])
+        self._s = add_bd_to_sched(self._s, self._bd)
+        
+    def shift_counts_by_res_and_block(self):
+        return (self._s.groupby(['Resident','Block'])['Shift']
+                       .count()
+                       .reset_index()
+                       .pivot(index='Block', columns='Resident', values='Shift')
+                       .fillna(0.0))
