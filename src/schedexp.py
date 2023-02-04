@@ -111,41 +111,73 @@ def load_block_dates(fn : str) -> pd.DataFrame:
 
 def load_residents(fn : str) -> pd.DataFrame:
     res = pd.read_csv(fn).reset_index()
+    res['Resident'] = res['firstName'].str[0] + ' ' + res['lastName']
     return res
 
-def add_bd_to_sched(s : pd.DataFrame, bd : pd.DataFrame):
-    s = s.copy()
+def bd_to_half_blocks(bd : pd.DataFrame):
     bd = bd.copy()
     bd.index = [i+1.0 for i in range(len(bd))]
     mids = bd[['Mid-Block Transition Date']]
     mids.index = [b+0.5 for b in bd.index]
     mids['Start Date'] = mids['Mid-Block Transition Date']
-    bd = pd.concat([bd[['Start Date']], mids[['Start Date']]], axis=0).sort_index()
+    bd = pd.concat([bd[['Start Date']], 
+                    mids[['Start Date']],
+                    pd.DataFrame({'Start Date': [pd.to_datetime(datetime.date(2023,6,30))]},
+                                index=[14.0])
+                    ], axis=0).sort_index()
     bd.index.name = 'Block'
 
+    return bd    
+
+def add_bd_to_sched(s : pd.DataFrame, bd : pd.DataFrame):
+    s = s.copy()
+    bd = bd.copy()
+    bd = bd_to_half_blocks(bd)
+
     s['Block'] = -1
-    for blk, r in bd.iloc[:-1, :].iterrows():
-        print(blk, blk + 0.5, r)
-        s.loc[(s.index >= r['Start Date']) & (s.index < bd.loc[blk+0.5, 'Start Date']), 'Block'] = blk
+    for blk, r in bd.iloc[:-2, :].iterrows():
+        s.loc[(s['Start Date'] >= r['Start Date']) & (s['Start Date'] < bd.loc[blk+0.5, 'Start Date']), 'Block'] = blk
 
     return s
 
 class ScheduleExplorer:
 
-    def __init__(self, block_dates_fn : str, res_fn : str,
+    def __init__(self, start_date : datetime.date, end_date : datetime.date,
+        block_dates : pd.DataFrame, residents : pd.DataFrame,
         exclude_nonem=True):
 
-        self._bd = load_block_dates(block_dates_fn)
-        self._res = load_residents(res_fn)
-        self._s = None
+        self._bd = block_dates
+        self._res = residents 
         self._exclude_nonem = exclude_nonem
 
-    def load_sched(self, start_date : datetime.date, end_date : datetime.date):
-        self._s = load_sched_api(start_date, end_date)
+        self._half_bd = bd_to_half_blocks(self._bd)
+        delta_to_start = (self._half_bd - pd.to_datetime(start_date))['Start Date'].dt.total_seconds()
+        delta_to_start = delta_to_start[delta_to_start <= 0]
+        start_block = delta_to_start.idxmax()
+        start_block_date = self._half_bd.loc[start_block, 'Start Date']
+        delta_to_end = (self._half_bd - pd.to_datetime(end_date))['Start Date'].dt.total_seconds()
+        delta_to_end = delta_to_end[delta_to_end >= 0]
+        end_block = delta_to_end.idxmin()
+
+        end_block_date = self._half_bd.loc[end_block, 'Start Date'] - pd.Timedelta('1d')
+
+        self._start_date = start_date
+        self._end_date = end_date
+
+        self._start_block = start_block
+        self._end_block = end_block
+
+        self._start_block_date = start_block_date
+        self._end_block_date = end_block_date
+
+        self._s = load_sched_api(start_block_date, end_block_date)
         self._s = add_res_to_sched(self._s, self._res)
         if self._exclude_nonem:
             self._s = self._s.dropna(subset=['PGY'])
         self._s = add_bd_to_sched(self._s, self._bd)
+
+    def filter_residents(self, sel_res : t.Collection[str]):
+        self._s = self._s[self._s['Resident'].isin(sel_res)]
         
     def shift_counts_by_res_and_block(self):
         return (self._s.groupby(['Resident','Block'])['Shift']
@@ -153,3 +185,31 @@ class ScheduleExplorer:
                        .reset_index()
                        .pivot(index='Block', columns='Resident', values='Shift')
                        .fillna(0.0))
+
+    def get_sched(self, add_offservice=True):
+        if not add_offservice:
+            return self._s
+                  
+        scbrb = self.shift_counts_by_res_and_block().T
+        to_concat = []
+        for blk in scbrb:
+            no_shifts = scbrb[scbrb[blk] == 0.0][blk]
+            no_shifts_res = no_shifts.index.tolist()
+            for res_name in no_shifts_res:
+                blk_start = self._half_bd.loc[blk, 'Start Date']
+                blk_end = self._half_bd.loc[blk+0.5, 'Start Date']
+                to_concat.append({
+                    'Resident': res_name,
+                    'Start': blk_start,
+                    'End': blk_end,
+                    'Shift': 'OS',
+                    'Block': blk
+                })
+        toRet = pd.concat([self._s, pd.DataFrame(to_concat)])
+
+        return toRet
+
+
+
+    def __repr__(self):
+        return f'Schedule Block {self._start_block} to Block {self._end_block} ({self._start_block_date} to {self._end_block_date}) with {len(self._s)} shifts'
