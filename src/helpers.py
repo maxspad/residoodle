@@ -63,9 +63,9 @@ class CheckGroup:
         if caption is not None:
             st.caption(caption)
         if horizontal:
-            cols = st.columns(4)
+            cols = st.columns(len(values))
         else:
-            cols = [st,st,st,st]
+            cols = [st]*len(values)
         self._check_res = {lab : c.checkbox(lab) for lab, c in zip(labels, cols)}
 
     def __getitem__(self, label): 
