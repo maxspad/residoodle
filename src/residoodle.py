@@ -81,8 +81,8 @@ scbrb = (s.groupby(['Resident','Block'])['Shift']
           .pivot(index='Block', columns='Resident', values='Shift')
           .fillna(0.0)).T
 
-s
-scbrb
+# s
+# scbrb
 
 # Add special "OS" (off-service) shifts to those who aren't scheduled for a full block
 to_concat = []
@@ -102,22 +102,24 @@ for blk in scbrb:
                 'End': end,
                 'End Date': end.date(),
                 'End Hour': end.hour,
-                'Shift': 'OS'
+                'Shift': 'Off Service'
             })
 s = pd.concat([s, pd.DataFrame(to_concat)], axis=0)
-s
+# s
 
 days = pd.date_range(start_date, end_date, freq='D')
-days
+# days
 
+to_cat = []
 for d in days:
-    st.markdown(f'### {d}')
+    # st.markdown(f'### {d}')
     itv_start = d + pd.Timedelta(hours=start_time.hour, minutes=start_time.minute)
     itv_end = d + pd.Timedelta(hours=end_time.hour, minutes=end_time.minute)
 
     s_for_day = s[['Resident','Shift','Start','End']]
     s_for_day = s_for_day[(s_for_day['Start'] >= d) & (s_for_day['Start'] <= (d + pd.Timedelta(hours=23, minutes=59, seconds=59)))]
-    s_for_day['Overlap'] = s_for_day.apply(lambda r: ((itv_start <= r['Start'] <= itv_end) or (r['Start'] <= itv_start <= r['End'])), axis=1)
+    if len(s_for_day):
+        s_for_day['Overlap'] = s_for_day.apply(lambda r: ((itv_start <= r['Start'] <= itv_end) or (r['Start'] <= itv_start <= r['End'])), axis=1)
     
     sel_res_set = set(sel_res)
     identif_res_set = set(s_for_day['Resident'].unique())
@@ -125,14 +127,29 @@ for d in days:
 
     off_to_add = [
         {'Resident': r,
-         'Shift': 'Off',
+         'Shift': 'Day Off',
          'Start': d,
          'End': d + pd.Timedelta(hours=23, minutes=59, seconds=59),
          'Overlap': False}
          for r in off_res_set
     ]
     s_for_day = pd.concat([s_for_day, pd.DataFrame(off_to_add)])
+    s_for_day['Availability'] = s_for_day['Shift']
+    s_for_day.loc[(~s_for_day['Shift'].isin(['Day Off','Off Service'])) & (s_for_day['Overlap']), 'Availability'] = 'Shift'
+    s_for_day.loc[(~s_for_day['Shift'].isin(['Day Off','Off Service'])) & (~s_for_day['Overlap']), 'Availability'] = 'Available'
 
-    st.markdown(f'Interval: {itv_start} to {itv_end}')
-    st.dataframe(s_for_day)
-    st.write(off_res_set)
+    free_counts = s_for_day.groupby(['Availability'])[['Resident']].count()
+    free_counts.rename({'Resident': d}, inplace=True, axis=1)
+
+    # st.markdown(f'Interval: {itv_start} to {itv_end}')
+    # st.dataframe(s_for_day)
+    # st.dataframe(free_counts)
+
+    to_cat.append(free_counts)
+
+free_counts = pd.concat(to_cat, axis=1).fillna(0.0).astype('int').T
+free_counts = free_counts[['Off Service','Shift','Available','Day Off']]
+free_counts['Free'] = free_counts['Available'] + free_counts['Day Off']
+free_counts['Busy'] = free_counts['Off Service'] + free_counts['Shift']
+
+st.dataframe(free_counts)
