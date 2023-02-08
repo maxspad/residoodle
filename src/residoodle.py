@@ -50,15 +50,15 @@ with st.expander('About this App', expanded=False):
 with st.expander('Options', expanded=True):
     # st.markdown('**Step 1**: Pick the date range you want to search.')
     date_cols = st.columns(2)
-    start_date = date_cols[0].date_input('Start Date', value=datetime.date.today(),
+    start_date = date_cols[0].date_input('Search between **Start Date**', value=datetime.date.today(),
         min_value=datetime.date.today(), max_value=datetime.date(2023,6,30))
-    end_date = date_cols[1].date_input('End Date', value=datetime.date.today() + datetime.timedelta(days=7),
+    end_date = date_cols[1].date_input('and **End Date**', value=datetime.date.today() + datetime.timedelta(days=7),
         min_value=start_date, max_value=datetime.date(2023,6,30))
 
     # st.markdown('**Step 2**: Pick the time window you want your event to take place in. The app will score days by how many residents are available during this time window.')
     time_cols = st.columns(2)
-    start_time = time_cols[0].time_input('Start Time', value=datetime.time(17,0,0))
-    end_time = time_cols[1].time_input('End Time', value=datetime.time(22, 0, 0))
+    start_time = time_cols[0].time_input('Event **Start Time**', value=datetime.time(17,0,0))
+    end_time = time_cols[1].time_input('Event **End Time**', value=datetime.time(22, 0, 0))
 
     if end_time < start_time:
         st.error('End time must be after start time.')
@@ -66,11 +66,11 @@ with st.expander('Options', expanded=True):
 
     # st.markdown('**Step 3**: Choose the residents you want to attend your event.')
     msplc = st.empty()
-    sel_res = msplc.multiselect('Choose residents:', res['Resident'].tolist())
+    sel_res = msplc.multiselect('Choose **residents** (or select classes):', res['Resident'].tolist())
     cg = h.CheckGroup([1,2,3,4], ['PGY1','PGY2','PGY3','PGY4'])
     sel_pgy = cg.get_selected()
     if len(sel_pgy):
-        sel_res = msplc.multiselect('Choose residents', res['Resident'].tolist(),
+        sel_res = msplc.multiselect('Choose **residents** (or select classes):', res['Resident'].tolist(),
             default=res[res['pgy'].isin(sel_pgy)]['Resident'].tolist())
     if not len(sel_res):
         st.info('Choose at least one resident.')
@@ -93,7 +93,12 @@ scbrb = (s.groupby(['Resident','Block'])['Shift']
           .pivot(index='Block', columns='Resident', values='Shift')
           .fillna(0.0)).T
 
+sel_res_df = pd.DataFrame({'Resident':sel_res})
+sel_res_df = sel_res_df.join(scbrb, on='Resident').fillna(0.0).set_index('Resident')
+scbrb = sel_res_df.copy()
 
+scbrb
+# scbrb.join(pd.Series(sel_res, name='Resident'), on='Resident')
 # Add special "Off Service" shifts to those who aren't scheduled for a full block
 to_concat = []
 for blk in scbrb:
@@ -129,7 +134,7 @@ for d in days:
     s_for_day = s_for_day[(s_for_day['Start'] >= d) & (s_for_day['Start'] <= (d + pd.Timedelta(hours=23, minutes=59, seconds=59)))]
     if len(s_for_day):
         s_for_day['Overlap'] = s_for_day.apply(lambda r: ((itv_start <= r['Start'] <= itv_end) or (r['Start'] <= itv_start <= r['End'])), axis=1)
-    
+
     sel_res_set = set(sel_res)
     identif_res_set = set(s_for_day['Resident'].unique())
     off_res_set = sel_res_set - identif_res_set
@@ -170,16 +175,18 @@ st.markdown('The days with the most free residents in the range you selected.')
 
 best_days = cbd.groupby(['Day'])[['Count']].sum().reset_index().sort_values(['Count','Day'], ascending=[False, True])
 best_days = best_days.iloc[:3, :]
-
+# best_days
 cols = st.columns(len(best_days))
 titles = ['🥇', '🥈', '🥉']
 for i, c in enumerate(cols):
+    d = best_days.iloc[i,:]['Day']
     cbd_for_day = cbd[cbd['Day'] == d].set_index('Availability')
+    # cbd_for_day
     c.markdown(f'## {titles[i]} {best_days.iloc[i, 0].strftime("%m/%d")}')
-    n_free = cbd_for_day.loc[~cbd_for_day.index.isin(['Off Service','Shift']), 'Count'].sum()
+    # st.write(cbd_for_day[~cbd_for_day.index.isin(['Off Service','Shift'])]['Count'].sum())
+    n_free = cbd_for_day[~cbd_for_day.index.isin(['Off Service','Shift'])]['Count'].sum()
     c.markdown(f'**{n_free}** out of {len(sel_res)} residents free.')
 
-    d = best_days.iloc[i,:]['Day']
     md_str = ''
     for k in ['Day Off','Available','Shift','Off Service']:
         if k in cbd_for_day.index:
@@ -192,15 +199,28 @@ for i, c in enumerate(cols):
 # cbd
 # best_days
 
+st.markdown('# All Days')
+st.markdown('A day-by-day look at how many residents are free over the selected date range. Mouse over the graph for more information.')
+
 plt = px.bar(cbd, x='Day', y='Count', color='Availability', hover_data=['Residents'],
     title='Number of Free Residents by Day',
     color_discrete_map={'Day Off': '#2ECC71', 'Available': '#82E0AA', 'Off Service': '#EC7063', 'Shift': '#E74C3C'})
-plt.add_vrect(x0=f'{best_days.iloc[0,0] - pd.Timedelta("13h")}', x1=f'{best_days.iloc[0,0] + pd.Timedelta("13h")}', 
-    fillcolor='green', opacity=0.25, 
-    annotation_font_size=16, 
-    annotation_font_color='black',
-    annotation_text='Best Day!',
-    annotation_position="inside bottom left")
+opacities = [0.3, 0.15, 0.075]
+for i in range(len(best_days)):
+    plt.add_vrect(x0=f'{best_days.iloc[i,0] - pd.Timedelta("12h")}', x1=f'{best_days.iloc[i,0] + pd.Timedelta("12h")}', 
+        fillcolor='green', opacity=opacities[i], 
+        annotation_font_size=16, 
+        annotation_font_color='black',
+        annotation_text=titles[i],
+        annotation_position="inside top left")
 st.plotly_chart(plt)
 
+
+st.markdown('# All Shifts')
+st.markdown('The shifts worked by the residents over the selected date range. You may want to click the arrows in the corner of the table to view it full screen.')
+all_shifts = avail.groupby(['Day','Shift'])['Resident'].apply(lambda x: ', '.join(x)).reset_index().pivot(index='Shift', columns='Day', values='Resident').fillna('').sort_index()
+all_shifts.columns = [c.strftime('%m/%d') for c in all_shifts.columns]
+# blah = blah.style.set_properties(**{'white-space': 'pre-wrap'})
+st.dataframe(all_shifts)
+# blah = pd.pivot(avail, index='Day', columns='Shift', values='Resident')
 
