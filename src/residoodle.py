@@ -1,42 +1,53 @@
 import streamlit as st 
-
-import datetime
-import pandas as pd
-import plotly.express as px
-import plotly.io as pio
-
-from typing import Tuple
-
 import helpers as h
-import config as cf
 import schedexp as sched
 
-import logging as log
+import pandas as pd 
+import datetime
 
-pio.templates.default = 'seaborn'
+# Open the data helper files
+rdb = pd.read_excel('data/residoodle_db.xlsx', index_col=0,
+                    sheet_name=['Residents','Blocks','ResidentBlockSchedule'])
+res, blocks, rbs = rdb['Residents'], rdb['Blocks'], rdb['ResidentBlockSchedule']
 
-@st.experimental_memo
-def load_schedule(start_date : datetime.date, end_date : datetime.date):
+# rename a column in res to make it easier
+res = res.rename({'schedName': 'Resident'}, axis=1)
 
-    s = sched.load_sched_api(start_date, end_date, remove_nonum_hurley=True)
+# remove Kirstin Scott from rbs
+rbs = rbs[rbs['Resident'] != 'Scott, Kirstin']
+# join block dates to rbs
+rbs = pd.merge(rbs, blocks, on='Block')
+# join the right resident names to rbs
+rbs = rbs.rename({'Resident':'fullName'}, axis=1).join(res[['Resident']], on='userId')
 
-    return s
+# Update blocks so that "Orient/ED" becomes just ED
+rbs['Rotation'].replace({0: 'Leave', 'Orient/ED': 'ED'}, inplace=True)
 
-@st.experimental_memo
-def get_helper_data() -> Tuple[pd.DataFrame, pd.DataFrame]:
-    '''Load helper dataframes'''
-    bd = sched.load_block_dates(cf.BLOCK_DATES_FN).set_index('Block')
-    half_bd = sched.bd_to_half_blocks(bd)
-    res = sched.load_residents(cf.RESIDENTS_FN)
-    return bd, half_bd, res
+# anything not (and not ED/EM/US) is straight off service for 4 weeks
+rbs_os = rbs[(~rbs['Rotation'].str.contains('/')) & (~rbs['Rotation'].isin(['US','ED','EM']))]
+rbs_os = rbs_os.drop(['MidDate','Block'], axis=1)
 
+# anything with a slash is a split 2-week/2-week block
+rbs_split = rbs[rbs['Rotation'].str.contains('/')]
+rbs_split['Rotation'] = rbs_split['Rotation'].str.split('/')
+# Create two rows for each split block
+rbs_split = rbs_split.explode(column='Rotation')
+rbs_split['Rotation'] = rbs_split['Rotation'].str.strip() # clean whitespace
+# Beginning block gets 0, half gets 0.5
+rbs_split['HalfBlock'] = rbs_split.groupby(['Resident','Block']).cumcount() * 0.5
+# Get rid of half blocks that are in EM
+rbs_split = rbs_split[~rbs_split['Rotation'].isin(['ED', 'US', 'EM'])]
+# Impute the half block date as the end date for first half 
+# split rotaions and as the start date for second half split rotations
+rbs_split.loc[rbs_split['HalfBlock'] == 0, 'EndDate'] = rbs_split.loc[rbs_split['HalfBlock'] == 0, 'MidDate'] - pd.Timedelta('1d')
+rbs_split.loc[rbs_split['HalfBlock'] == 0.5, 'StartDate'] = rbs_split.loc[rbs_split['HalfBlock'] == 0.5, 'MidDate']
+# Get rid of unnecessary columns
+rbs_split = rbs_split.drop(['MidDate','Block','HalfBlock'], axis=1)
 
-# Load helper data
-bd, half_bd, res = get_helper_data()
-bd.index = [f'Block {b}' for b in bd.index]
+# Combine the full-block and split-block rotations
+rbs = pd.concat([rbs_os, rbs_split], axis=0)
 
-DATE_FMT = "%m/%d/%y"
-
+'''
 title_cols = st.columns([1, 5])
 with title_cols[0]:
     st.image('raccoon.png', width=100)
@@ -46,6 +57,7 @@ with title_cols[1]:
 
 with st.expander('About this App', expanded=False):
     st.markdown(cf.ABOUT_RESIDOODLE)
+'''
 
 with st.expander('Options', expanded=True):
     # st.markdown('**Step 1**: Pick the date range you want to search.')
@@ -72,10 +84,106 @@ with st.expander('Options', expanded=True):
     if len(sel_pgy):
         sel_res = msplc.multiselect('Choose **residents** (or select classes):', res['Resident'].tolist(),
             default=res[res['pgy'].isin(sel_pgy)]['Resident'].tolist())
+    exclude_conf = st.checkbox('Treat Conference time as "busy"', value=True)
     if not len(sel_res):
         st.info('Choose at least one resident.')
         st.stop()
 
+# Load the schedule
+s = sched.load_sched_api(start_date, end_date, remove_nonum_hurley=True)
+
+# Filter the schedule and rbs to the selected residents
+s = s[s['Resident'].isin(sel_res)]
+rbs = rbs[rbs['Resident'].isin(sel_res)]
+
+# Filter RBS so that only blocks which overlap with the selected dates
+# are included
+start_date = pd.Timestamp(start_date)
+end_date = pd.Timestamp(end_date)
+to_incl = (((start_date <= rbs['StartDate']) &
+            (rbs['StartDate'] <= end_date)) | 
+           ((rbs['StartDate'] <= start_date) &
+            (start_date <= rbs['EndDate'])))
+rbs = rbs[to_incl]
+# ((itv_start <= r['Start'] <= itv_end) or (r['Start'] <= itv_start <= r['End']))
+# rbs
+
+# For any off-service rotation in the block schedule, add a "dummy"
+# shift for each day in the Block StartDate-EndDate interval, inclusive 
+# of EndDate
+dummy_os_shifts = []
+for i in range(len(rbs)):
+    r = rbs.iloc[i,:]
+    # if not (r['Resident'] in sel_res): continue # SKIP if not in the selected residents
+    block_days = pd.date_range(r['StartDate'], r['EndDate'], freq='D', inclusive='both')
+    for d in block_days:
+        dummy_start = d
+        dummy_end = d + pd.Timedelta(hours=23, minutes=59, seconds=59)
+        dummy_os_shifts.append({
+            'Resident': r['Resident'],
+            'userID': r['userId'],
+            'Shift': r['Rotation'],
+            'Start': d,
+            'End': d + pd.Timedelta(hours=23, minutes=59, seconds=59),
+            'Type': 'Off Service',
+            'Site': 'OS',
+            'Length': 24,
+            'Start Date': dummy_start.date(),
+            'Start Hour': dummy_start.hour,
+            'End Date': dummy_end.date(),
+            'End Hour': dummy_end.hour
+        })
+
+# Add a dummy conference shift for every selected resident on every wednesday in the
+# interval
+dummy_conf_shifts = []
+sel_date_range = pd.date_range(start_date, end_date, freq='D', inclusive='both')
+wed_date_range = sel_date_range[sel_date_range.weekday == 2]
+for d in wed_date_range:
+    for r in sel_res:
+        dummy_conf_shifts.append({
+            'Resident': r,
+            'Shift': 'Conference',
+            'Start': d + pd.Timedelta(hours=10),
+            'End': d + pd.Timedelta(hours=14),
+            'Type': 'Conference',
+            'Length': 4,
+            'Start Date': d.date(),
+            'Start Hour': 10,
+            'End Date': d.date(),
+            'End Hour': 14
+        })
+s = pd.concat([s, pd.DataFrame(dummy_os_shifts), pd.DataFrame(dummy_conf_shifts)])
+
+# s
+
+# For each day in the selected range, create the selected time interval
+# within that day and see which shifts in s overlap
+def overlap_for_day(day_grp: pd.DataFrame):
+    d = day_grp.name
+    start = pd.Timestamp(d) + pd.Timedelta(hours=start_time.hour, minutes=start_time.minute)
+    end = pd.Timestamp(d) + pd.Timedelta(hours=end_time.hour, minutes=end_time.minute)
+    is_overlap = (((start <= day_grp['Start']) &
+                   (day_grp['Start'] <= end)) | 
+                  ((day_grp['Start'] <= start) &
+                   (start <= day_grp['End'])))
+    return is_overlap
+
+s['Overlap'] = False
+for d in sel_date_range:
+    start = pd.Timestamp(d) + pd.Timedelta(hours=start_time.hour, minutes=start_time.minute)
+    end = pd.Timestamp(d) + pd.Timedelta(hours=end_time.hour, minutes=end_time.minute)
+    is_overlap = (((start <= s['Start']) &
+                   (s['Start'] <= end)) | 
+                  ((s['Start'] <= start) &
+                   (start <= s['End'])))
+    s.loc[is_overlap, 'Overlap'] = True
+s['Free'] = ~s['Overlap']
+
+s
+
+
+'''
 block_start, block_end = sched.get_flanking_block_dates(half_bd, start_date, end_date)
 
 log.info(f'Loading schedule between {block_start} and {block_end}')
@@ -224,3 +332,4 @@ all_shifts.columns = [c.strftime('%m/%d') for c in all_shifts.columns]
 st.dataframe(all_shifts)
 # blah = pd.pivot(avail, index='Day', columns='Shift', values='Resident')
 
+'''
