@@ -137,7 +137,7 @@ def get_flanking_block_dates(half_bd : pd.DataFrame, start_date : datetime.date,
     delta_to_end = (half_bd - pd.to_datetime(end_date))['Start Date'].dt.total_seconds()
     delta_to_end = delta_to_end[delta_to_end >= 0]
     end_block = delta_to_end.idxmin()
-    end_block_date = half_bd.loc[end_block, 'Start Date'] - pd.Timedelta('1d')
+    end_block_date = half_bd.loc[end_block, 'Start Date']
 
     return start_block_date, end_block_date
 
