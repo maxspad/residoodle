@@ -37,7 +37,7 @@ with st.expander('Options', expanded=True):
     if len(sel_pgy):
         sel_res = msplc.multiselect('Choose **residents** (or select classes):', res['Resident'].tolist(),
             default=res[res['pgy'].isin(sel_pgy)]['Resident'].tolist())
-    exclude_conf = st.checkbox('Treat Conference time as "busy"', value=True)
+    # exclude_conf = st.checkbox('Treat Conference time as "busy"', value=True)
     if not len(sel_res):
         st.info('Choose at least one resident.')
         st.stop()
@@ -72,7 +72,7 @@ rbs = (
        .query('(@start_date <= Start <= @end_date) or (Start <= @start_date <= End)')
 )
 
-rbs 
+# rbs 
 
 def expand_os_to_days(r : pd.DataFrame):
     ser = r.iloc[0,:]
@@ -90,22 +90,22 @@ rbs = (rbs.groupby(['Resident','Start'])
           .apply(expand_os_to_days)
           .reset_index(drop=True)
           .filter(['userId','Resident','Block','Shift','Start','End','Site','Type']))
-st.write('rbs days')
-rbs
+# st.write('rbs days')
+# rbs
 
 # Load the schedule for the selected residents
 s = (sched.load_sched_api(start_date, end_date.date(), remove_nonum_hurley=True)
           .query('Resident in @sel_res'))
-st.write('initial loaded schedule')
-s
-st.write(end_date)
+# st.write('initial loaded schedule')
+# s
+# st.write(end_date)
 s = (
     pd.concat([s, rbs])
       .filter(['Resident','Shift','Site','Type','Start','End'])
       .query('(@start_date <= Start <= @end_date) or (Start <= @start_date <= End)')
 )
-st.write('schedule with added offservice')
-s
+# st.write('schedule with added offservice')
+# s
 
 def get_busy_counts(g : pd.DataFrame):
     day_off_res = set(sel_res) - set(g['Resident'].unique())
@@ -146,12 +146,26 @@ avail = (
     s.groupby(pd.Grouper(key='Start', freq='D')).apply(get_busy_counts)
      .reset_index()
 )
-avail
-st.write(avail.groupby(['Start','Availability'])['Resident']
-              .count()
-              .reset_index()
-              .pivot(index='Availability', columns='Start', values='Resident')
-              .fillna(0).astype('int'))
+avail_by_day = pd.DataFrame(
+    avail.groupby(['Start','Availability'])['Resident']
+        .count()
+        .reset_index()
+        .pivot(index='Availability', columns='Start', values='Resident')
+        .fillna(0).astype('int')
+)
 
+
+avail_by_shift = pd.DataFrame(
+    avail.assign(AvailShift= (avail['Resident'] + ' (' + avail['Shift'] + ')'))
+         .groupby(['Start','Availability'])['AvailShift']
+         .agg(lambda g: ', '.join(g))
+         .reset_index()
+         .pivot(index='Availability', columns='Start', values='AvailShift')
+         .fillna('')
+)
+
+# blah = (avail_by_day.join(avail_by_shift))
+
+# st.write(blah.reset_index().pivot(index='Availability', columns='Start', values='Resident'))
 
 
