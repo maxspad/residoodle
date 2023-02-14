@@ -12,12 +12,6 @@ rdb = pd.read_excel('data/residoodle_db.xlsx', index_col=0,
                     sheet_name=['Residents','Blocks','ResidentBlockSchedule'])
 res, blocks, rbs = rdb['Residents'], rdb['Blocks'], rdb['ResidentBlockSchedule']
 
-title_cols = st.columns([1, 5])
-with title_cols[0]:
-    st.image('raccoon.png', width=100)
-with title_cols[1]:
-    st.title('ResiDoodle')
-    st.caption("It's a doodle poll that fills itself out!")
 
 with st.expander('About this App', expanded=False):
     st.markdown(cf.ABOUT_RESIDOODLE)
