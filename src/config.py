@@ -1,6 +1,8 @@
 BLOCK_DATES_FN = 'data/block_dates_2023.csv'
 RESIDENTS_FN = 'data/residents_2022_2023.csv'
 
+GOOGLE_FORM_URL = 'https://forms.gle/eZbazrwhPTAejdck7'
+
 ABOUT_RESIDOODLE = '''
 ## About this App
 
@@ -22,9 +24,9 @@ It pulls it directly from the ShiftAdmin database.
 
 **How does it know who is off-service?**
 
-I hand typed the whole block schedule...
+I hand-typed the whole block schedule...
 
-**What's the difference between "Day Off" and "Available"?**
+**What's the difference between "Day Off" and "Free"?**
 
 A "Day Off" means the resident literally isn't scheduled to work in the ED that day
 (though they may be post-night, yay DOMA). "Free" means the resident is scheduled
