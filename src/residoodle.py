@@ -117,6 +117,7 @@ s = (
       .filter(['Resident','Shift','Site','Type','Start','End'])
       .query('(@start_date <= Start <= @end_date) or (Start <= @start_date <= End)')
 )
+
 # st.write('schedule with added offservice')
 # s
 
@@ -157,13 +158,34 @@ def get_busy_counts(g : pd.DataFrame):
         }).set_index('Resident')
     except:
         st.write([(day_off_res ,day_off_shifts), (os_res, os_shifts), (shift_res, shift_res_shifts), (free_res, free_res_shifts)])
-        st.error('as;dlfkj')
+        st.error('Failure...')
         st.stop()
 
+# s
+
+def print_and_return(x):
+    print(x)
+    return x
+
 avail = (
-    s.groupby(pd.Grouper(key='Start', freq='D')).apply(get_busy_counts)
+    s.groupby(pd.Grouper(key='Start', freq='D'))
+     .apply(get_busy_counts)
      .reset_index()
+     .groupby('Resident')
+     .apply(lambda g: (g
+         .reset_index()
+         .drop_duplicates(subset=['Start'], keep='last') # protects against bad offservice rotations
+         .set_index('Start', drop=True)
+         .reindex(pd.date_range(start_date, end_date))
+         .fillna({'Resident': g.name, 'Availability': 'Day Off', 'Shift': 'Off'})
+     ))
+     .drop(columns='Resident')
+     .reset_index()
+     .rename(columns={'level_1': 'Start'})
 )
+
+# 'avail'
+# avail
 
 avail_by_day_long = pd.DataFrame(
     avail.groupby(['Start','Availability'])['Resident']
@@ -175,17 +197,25 @@ avail_by_day_long = pd.DataFrame(
                  .agg(lambda g: ', '.join(g))    
         )
 ).reset_index()
-avail_by_day_long
-# st.write(avail_by_day_long)
+
+# 'avail by day long'
+# avail_by_day_long
+
 avail_by_day = (
     avail_by_day_long
         .pivot(index='Availability', columns='Start', values='Resident')
-        .fillna(0).astype('int').T
+        .reindex(['Day Off','On Shift','Off Service','Free'], fill_value=0)
+        .T
+        .reindex(pd.date_range(start_date, end_date, freq='D'))
+        .fillna(0)
+        .astype('int')
         .assign(Busy= lambda df_: df_['Off Service'] + df_['On Shift'],
                 Available= lambda df_: df_['Free'] + df_['Day Off']) # TODO Fix if one of these is missing
-                
+        .rename_axis('Start', axis=0)
 )
 
+# 'Avail by day'
+# avail_by_day
 
 avail_by_shift = pd.DataFrame(
     avail.assign(AvailShift= (avail['Resident'] + ' (' + avail['Shift'] + ')'))
@@ -193,8 +223,14 @@ avail_by_shift = pd.DataFrame(
          .agg(lambda g: ', '.join(g))
          .reset_index()
          .pivot(index='Availability', columns='Start', values='AvailShift')
-         .fillna('').T
+         .reindex(['Day Off','On Shift','Off Service','Free'])
+         .T
+         .reindex(pd.date_range(start_date, end_date, freq='D'))
+         .fillna('None')    
 )
+
+# 'Avail by shift'
+# avail_by_shift
 
 st.markdown('# Best Days')
 st.markdown('The days with the most free residents in the range you selected.')
