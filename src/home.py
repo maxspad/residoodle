@@ -9,9 +9,7 @@ from typing import Collection
 
 def run():
     # Open the data helper files
-    rdb = pd.read_excel('data/residoodle_db.xlsx', index_col=0,
-                        sheet_name=['Residents','Blocks','ResidentBlockSchedule'])
-    res, blocks, rbs = rdb['Residents'], rdb['Blocks'], rdb['ResidentBlockSchedule']
+    res, blocks, rbs = load_residoodle_db('data/residoodle_db.xlsx')
 
     with st.expander('Options', expanded=True):
         # st.markdown('**Step 1**: Pick the date range you want to search.')
@@ -86,8 +84,11 @@ def run():
     # rbs
 
     # Load the schedule for the selected residents
-    s = (sched.load_sched_api(start_date, end_date.date(), remove_nonum_hurley=True)
-            .query('Resident in @sel_res'))
+    s = (
+        load_shiftadmin_sched(start_date, end_date.date())
+        .query('Resident in @sel_res')
+    )
+
     # st.write('initial loaded schedule')
     # s
     # st.write(end_date)
@@ -221,6 +222,18 @@ def run():
     # blah = (avail_by_day.join(avail_by_shift))
 
     # st.write(blah.reset_index().pivot(index='Availability', columns='Start', values='Resident'))
+
+@st.experimental_memo(show_spinner=False)
+def load_residoodle_db(rdb_fn : str):
+    rdb = pd.read_excel(rdb_fn, index_col=0,
+                        sheet_name=['Residents','Blocks','ResidentBlockSchedule'])
+    res, blocks, rbs = rdb['Residents'], rdb['Blocks'], rdb['ResidentBlockSchedule']
+    return res, blocks, rbs
+
+@st.experimental_memo(show_spinner=False)
+def load_shiftadmin_sched(start_date : datetime.date, end_date : datetime.date):
+    s = sched.load_sched_api(start_date, end_date, remove_nonum_hurley=True)
+    return s
 
 def expand_os_to_days(r : pd.DataFrame):
     ser = r.iloc[0,:]
