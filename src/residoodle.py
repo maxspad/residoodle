@@ -3,11 +3,24 @@ import pandas as pd
 import datetime
 import helpers as h
 import schedexp as sched
+import config as cf
+import plotly.express as px
+
 
 # Open the data helper files
 rdb = pd.read_excel('data/residoodle_db.xlsx', index_col=0,
                     sheet_name=['Residents','Blocks','ResidentBlockSchedule'])
 res, blocks, rbs = rdb['Residents'], rdb['Blocks'], rdb['ResidentBlockSchedule']
+
+title_cols = st.columns([1, 5])
+with title_cols[0]:
+    st.image('raccoon.png', width=100)
+with title_cols[1]:
+    st.title('ResiDoodle')
+    st.caption("It's a doodle poll that fills itself out!")
+
+with st.expander('About this App', expanded=False):
+    st.markdown(cf.ABOUT_RESIDOODLE)
 
 with st.expander('Options', expanded=True):
     # st.markdown('**Step 1**: Pick the date range you want to search.')
@@ -125,7 +138,7 @@ def get_busy_counts(g : pd.DataFrame):
                  .query('(@start_time <= StartTime <= @end_time) or (StartTime <= @start_time <= EndTime)')
     )
     shift_res = set(on_shift['Resident'])
-    shift_res_shifts = on_shift['Shift'].unique().tolist()
+    shift_res_shifts = on_shift['Shift'].tolist()
     # st.write(len(shift_res), len(shift_res_shifts))
     
     not_on_shift = (
@@ -133,25 +146,44 @@ def get_busy_counts(g : pd.DataFrame):
                  .query('not ((@start_time <= StartTime <= @end_time) or (StartTime <= @start_time <= EndTime))')
     )
     free_res = set(not_on_shift['Resident'])
-    free_res_shifts = not_on_shift['Shift'].unique().tolist()
+    free_res_shifts = not_on_shift['Shift'].tolist()
     # st.write(len(free_res), len(free_res_shifts))
 
-    return pd.DataFrame({
-        'Availability': (['Day Off']*len(day_off_res) + ['Off Service']*len(os_res) + ['On Shift']*len(shift_res) + ['Free']*len(free_res)),
-        'Resident': list(day_off_res) + list(os_res) + list(shift_res) + list(free_res),
-        'Shift': day_off_shifts + os_shifts + shift_res_shifts + free_res_shifts
-    }).set_index('Resident')
+    try: 
+        return pd.DataFrame({
+            'Availability': (['Day Off']*len(day_off_res) + ['Off Service']*len(os_res) + ['On Shift']*len(shift_res) + ['Free']*len(free_res)),
+            'Resident': list(day_off_res) + list(os_res) + list(shift_res) + list(free_res),
+            'Shift': day_off_shifts + os_shifts + shift_res_shifts + free_res_shifts
+        }).set_index('Resident')
+    except:
+        st.write([(day_off_res ,day_off_shifts), (os_res, os_shifts), (shift_res, shift_res_shifts), (free_res, free_res_shifts)])
+        st.error('as;dlfkj')
+        st.stop()
 
 avail = (
     s.groupby(pd.Grouper(key='Start', freq='D')).apply(get_busy_counts)
      .reset_index()
 )
-avail_by_day = pd.DataFrame(
+
+avail_by_day_long = pd.DataFrame(
     avail.groupby(['Start','Availability'])['Resident']
-        .count()
-        .reset_index()
+    .count()
+    ).join(
+        pd.DataFrame(
+            avail.assign(AvailShift= (avail['Resident'] + ' (' + avail['Shift'] + ')'))
+                 .groupby(['Start','Availability'])['AvailShift']
+                 .agg(lambda g: ', '.join(g))    
+        )
+).reset_index()
+avail_by_day_long
+# st.write(avail_by_day_long)
+avail_by_day = (
+    avail_by_day_long
         .pivot(index='Availability', columns='Start', values='Resident')
-        .fillna(0).astype('int')
+        .fillna(0).astype('int').T
+        .assign(Busy= lambda df_: df_['Off Service'] + df_['On Shift'],
+                Available= lambda df_: df_['Free'] + df_['Day Off']) # TODO Fix if one of these is missing
+                
 )
 
 
@@ -161,9 +193,56 @@ avail_by_shift = pd.DataFrame(
          .agg(lambda g: ', '.join(g))
          .reset_index()
          .pivot(index='Availability', columns='Start', values='AvailShift')
-         .fillna('')
+         .fillna('').T
 )
 
+st.markdown('# Best Days')
+st.markdown('The days with the most free residents in the range you selected.')
+
+# avail_by_shift
+
+best_days = avail_by_day.sort_values(['Available','Free','Day Off','Start'], ascending=[False, True, False, False]).iloc[:3, :].index
+# best_days = cbd.groupby(['Day'])[['Count']].sum().reset_index().sort_values(['Count','Day'], ascending=[False, True])
+# best_days = best_days.iloc[:3, :]
+# best_days
+cols = st.columns(len(best_days))
+titles = ['🥇', '🥈', '🥉']
+for i, c in enumerate(cols):
+    d = best_days[i]
+
+    c.markdown(f'## {titles[i]} {d.strftime("%m/%d")}')
+    n_free = avail_by_day.loc[d, 'Available']
+
+    c.markdown(f'**{n_free}** out of {len(sel_res)} residents free.')
+
+    md_str = ''
+    for k in ['Day Off','Free','On Shift','Off Service']:
+        md_str += f'**{k}**: {avail_by_shift.loc[d, k]}\n\n'
+    c.markdown(md_str)
+
+# st.write(avail_by_day_long)
+
+# avail_by_shift
+
+st.markdown('# All Days')
+st.markdown('A day-by-day look at how many residents are free over the selected date range. Mouse over the graph for more information.')
+
+avail_by_day_long_for_bar = (
+    avail_by_day_long.rename({'Start': 'Day', 'Resident':'Count', 'AvailShift':'Residents'}, axis=1)
+        .assign(Count= lambda df_: df_['Count'].where(df_['Availability'].isin(['Day Off','Free']), -1*df_['Count']))
+)
+plt = px.bar(avail_by_day_long_for_bar, x='Day', y='Count', color='Availability', hover_data=['Residents'],
+    title='Number of Free Residents by Day',
+    color_discrete_map={'Day Off': '#2ECC71', 'Free': '#82E0AA', 'Off Service': '#EC7063', 'On Shift': '#E74C3C'})
+opacities = [0.3, 0.15, 0.075]
+for i in range(len(best_days)):
+    plt.add_vrect(x0=f'{best_days[i] - pd.Timedelta("12h")}', x1=f'{best_days[i] + pd.Timedelta("12h")}', 
+        fillcolor='green', opacity=opacities[i], 
+        annotation_font_size=16, 
+        annotation_font_color='black',
+        annotation_text=titles[i],
+        annotation_position="inside top left")
+st.plotly_chart(plt)
 # blah = (avail_by_day.join(avail_by_shift))
 
 # st.write(blah.reset_index().pivot(index='Availability', columns='Start', values='Resident'))

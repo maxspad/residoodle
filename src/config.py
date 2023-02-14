@@ -22,18 +22,16 @@ It pulls it directly from the ShiftAdmin database.
 
 **How does it know who is off-service?**
 
-It guesses! It looks for two-week blocks where people are not scheduled in the ED. 
-If they go a full two weeks without being scheduled, the app assumes they're off-service.
-This is obviously not perfect and can make mistakes!
+I hand typed the whole block schedule...
 
 **What's the difference between "Day Off" and "Available"?**
 
 A "Day Off" means the resident literally isn't scheduled to work in the ED that day
-(though they may be post-night, yay DOMA). "Available" means the resident is scheduled
+(though they may be post-night, yay DOMA). "Free" means the resident is scheduled
 to work but their shift doesn't overlap the chosen time window.
 
 **Is there anything scheduling-wise that it doesn't include?**
 
 It doesn't have ultrasound shifts right now, and vacations are considered as "days off" 
-rather than handled differently.
+rather than handled differently. CES is considered off-service. 
 '''
