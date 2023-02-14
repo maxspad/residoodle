@@ -46,7 +46,6 @@ def run():
             st.info('Choose at least one resident.')
             st.stop()
 
-    st.write(start_date, start_time)
     rbs = (
         rbs.join(blocks, on='Block', rsuffix='hi') # add block dates
         .replace(to_replace={'Rotation': {0: 'Leave', 'Orient/ED': 'ED'}}) # correct rotation names
