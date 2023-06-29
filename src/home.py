@@ -15,9 +15,9 @@ def run():
         # st.markdown('**Step 1**: Pick the date range you want to search.')
         date_cols = st.columns(2)
         start_date = date_cols[0].date_input('Search between **Start Date**', value=datetime.date.today(),
-            min_value=datetime.date.today(), max_value=datetime.date(2023,6,30))
+            min_value=datetime.date.today(), max_value=datetime.date(2024,6,30))
         end_date = date_cols[1].date_input('and **End Date**', value=start_date + datetime.timedelta(days=7),
-            min_value=start_date, max_value=datetime.date(2023,6,30))
+            min_value=start_date, max_value=datetime.date(2024,6,30))
         
         end_date = datetime.datetime(year=end_date.year, month=end_date.month, day=end_date.day,
                                     hour=23, minute=59, second=59)
